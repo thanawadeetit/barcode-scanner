@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Barcode Scanner to Google Sheet</title>
+    
+    <!-- Tailwind CSS สำหรับจัด Layout ให้ Responsive -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome สำหรับไอคอน -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- HTML5 QRCode สำหรับเปิดกล้องสแกน -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    
+    <!-- SweetAlert2 สำหรับแจ้งเตือนสวยๆ -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9fafb; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        #reader { width: 100%; border-radius: 8px; overflow: hidden; background: #f3f4f6; }
+        #reader video { object-fit: cover; border-radius: 8px; }
+    </style>
+</head>
+<body class="text-gray-800 pb-10">
+
+    <div class="max-w-2xl mx-auto px-4 pt-8">
+        <!-- Header -->
+        <div class="text-center mb-6">
+            <h1 class="text-2xl font-bold mb-1">Barcode Scanner</h1>
+            <p class="text-gray-500 text-sm">สแกนบาร์โค้ดและบันทึกลง Google Sheet</p>
+        </div>
+
+        <!-- Tabs -->
+        <div class="flex bg-gray-100 rounded-lg p-1 mb-6">
+            <button onclick="switchTab('scan')" id="tab-scan" class="flex-1 py-2 text-sm font-medium rounded-md bg-white shadow-sm text-gray-800 transition-all">
+                <i class="fa-solid fa-camera mr-2"></i> สแกน
+            </button>
+            <button onclick="switchTab('history')" id="tab-history" class="flex-1 py-2 text-sm font-medium rounded-md text-gray-500 hover:text-gray-800 transition-all">
+                <i class="fa-solid fa-clock-rotate-left mr-2"></i> ประวัติ
+            </button>
+            <button onclick="switchTab('settings')" id="tab-settings" class="flex-1 py-2 text-sm font-medium rounded-md text-gray-500 hover:text-gray-800 transition-all">
+                <i class="fa-solid fa-gear mr-2"></i> ตั้งค่า
+            </button>
+        </div>
+
+        <!-- Tab Content: สแกน -->
+        <div id="content-scan" class="tab-content active bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+            <h2 class="font-bold text-lg mb-1">สแกนบาร์โค้ด</h2>
+            <p class="text-gray-500 text-sm mb-4">กรุณาตั้งค่า Google Sheet URL ในแท็บตั้งค่าก่อนใช้งาน</p>
+            
+            <div id="url-warning" class="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-sm mb-4 flex items-center hidden">
+                <i class="fa-solid fa-circle-exclamation mr-2"></i>
+                ยังไม่ได้ตั้งค่า Google Sheet URL ไปที่แท็บ "ตั้งค่า" เพื่อเพิ่ม URL
+            </div>
+
+            <!-- กล่องแสดงกล้อง -->
+            <div id="reader-container" class="relative mb-4">
+                <div id="reader" class="min-h-[250px] flex items-center justify-center border-2 border-dashed border-gray-300">
+                    <i class="fa-solid fa-camera text-4xl text-gray-400"></i>
+                </div>
+            </div>
+
+            <button id="btn-scan" onclick="toggleScanner()" class="w-full bg-gray-900 hover:bg-gray-800 text-white font-medium py-3 rounded-lg transition-colors">
+                <i class="fa-solid fa-camera mr-2"></i> <span id="btn-scan-text">เริ่มสแกน</span>
+            </button>
+        </div>
+
+        <!-- Tab Content: ประวัติ -->
+        <div id="content-history" class="tab-content bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="font-bold text-lg">ประวัติการสแกน (ในเครื่อง)</h2>
+                <button onclick="clearHistory()" class="text-red-500 text-sm hover:underline">ล้างประวัติ</button>
+            </div>
+            <ul id="history-list" class="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+                <li class="py-4 text-center text-gray-500 text-sm">ยังไม่มีประวัติการสแกน</li>
+            </ul>
+        </div>
+
+        <!-- Tab Content: ตั้งค่า -->
+        <div id="content-settings" class="tab-content bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+            <h2 class="font-bold text-lg mb-4">ตั้งค่าระบบ</h2>
+            
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Google Apps Script Web App URL</label>
+                <input type="text" id="script-url" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-gray-900 focus:border-gray-900" placeholder="https://script.google.com/macros/s/.../exec">
+                <p class="text-xs text-gray-500 mt-1">นำ URL ที่ได้จากการ Deploy Apps Script มาวางที่นี่</p>
+            </div>
+
+            <button onclick="saveSettings()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg transition-colors">
+                บันทึกการตั้งค่า
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let html5QrCode;
+        let isScanning = false;
+        let isProcessing = false;
+        let webAppUrl = localStorage.getItem('gasWebAppUrl') || '';
+        let scanHistory = JSON.parse(localStorage.getItem('scanHistory')) || [];
+
+        // กำหนดเสียง Beep เวลาสแกนสำเร็จ
+        const beepSound = new Audio('https://www.soundjay.com/buttons/sounds/beep-07a.mp3');
+
+        // เมื่อหน้าเว็บโหลดเสร็จ
+        window.onload = function() {
+            checkUrlWarning();
+            updateHistoryUI();
+            document.getElementById('script-url').value = webAppUrl;
+            
+            // เตรียมตัวแปรสแกนเนอร์
+            html5QrCode = new Html5Qrcode("reader");
+        };
+
+        // ฟังก์ชันสลับแท็บ
+        function switchTab(tabName) {
+            // หยุดสแกนเนอร์ถ้าเปิดแท็บอื่น
+            if (isScanning && tabName !== 'scan') {
+                stopScanner();
+            }
+
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('button[id^="tab-"]').forEach(el => {
+                el.classList.remove('bg-white', 'shadow-sm', 'text-gray-800');
+                el.classList.add('text-gray-500');
+            });
+
+            document.getElementById(`content-${tabName}`).classList.add('active');
+            
+            const activeTab = document.getElementById(`tab-${tabName}`);
+            activeTab.classList.remove('text-gray-500');
+            activeTab.classList.add('bg-white', 'shadow-sm', 'text-gray-800');
+        }
+
+        // ตรวจสอบว่ามีการตั้ง URL หรือยัง
+        function checkUrlWarning() {
+            if (!webAppUrl) {
+                document.getElementById('url-warning').classList.remove('hidden');
+            } else {
+                document.getElementById('url-warning').classList.add('hidden');
+            }
+        }
+
+        // บันทึก URL ลงเครื่อง
+        function saveSettings() {
+            const urlInput = document.getElementById('script-url').value.trim();
+            if (urlInput && !urlInput.startsWith('https://script.google.com/')) {
+                Swal.fire('ข้อผิดพลาด', 'รูปแบบ URL ไม่ถูกต้อง ต้องขึ้นต้นด้วย https://script.google.com/', 'error');
+                return;
+            }
+            
+            webAppUrl = urlInput;
+            localStorage.setItem('gasWebAppUrl', webAppUrl);
+            checkUrlWarning();
+            
+            Swal.fire({
+                icon: 'success',
+                title: 'บันทึกสำเร็จ',
+                showConfirmButton: false,
+                timer: 1500
+            });
+        }
+
+        // เริ่ม / หยุด สแกนเนอร์
+        function toggleScanner() {
+            if (!webAppUrl) {
+                Swal.fire('แจ้งเตือน', 'กรุณาตั้งค่า Google Sheet URL ก่อนสแกน', 'warning');
+                switchTab('settings');
+                return;
+            }
+
+            if (isScanning) {
+                stopScanner();
+            } else {
+                startScanner();
+            }
+        }
+
+        function startScanner() {
+            const config = { 
+                fps: 10, 
+                qrbox: { width: 250, height: 250 },
+                aspectRatio: 1.0
+            };
+
+            // ใช้ facingMode: "environment" เพื่อบังคับใช้กล้องหลัง
+            html5QrCode.start(
+                { facingMode: "environment" }, 
+                config, 
+                onScanSuccess,
+                onScanFailure
+            ).then(() => {
+                isScanning = true;
+                document.getElementById('btn-scan-text').innerText = "หยุดสแกน";
+                document.getElementById('btn-scan').classList.replace('bg-gray-900', 'bg-red-600');
+                document.getElementById('btn-scan').classList.replace('hover:bg-gray-800', 'hover:bg-red-700');
+            }).catch(err => {
+                Swal.fire('ข้อผิดพลาด', 'ไม่สามารถเข้าถึงกล้องได้: ' + err, 'error');
+            });
+        }
+
+        function stopScanner() {
+            if (html5QrCode && isScanning) {
+                html5QrCode.stop().then(() => {
+                    isScanning = false;
+                    document.getElementById('btn-scan-text').innerText = "เริ่มสแกน";
+                    document.getElementById('btn-scan').classList.replace('bg-red-600', 'bg-gray-900');
+                    document.getElementById('btn-scan').classList.replace('hover:bg-red-700', 'hover:bg-gray-800');
+                }).catch(err => console.error(err));
+            }
+        }
+
+        // เมื่อสแกนไม่สำเร็จ (ทำงานเรื่อยๆ เป็น Loop เลยไม่แจ้งเตือนบ่อย)
+        function onScanFailure(error) {
+            // ไม่ต้องทำอะไร ปล่อยให้มันพยายามสแกนเฟรมถัดไป
+        }
+
+        // เมื่อสแกนเจอข้อมูล
+        async function onScanSuccess(decodedText, decodedResult) {
+            if (isProcessing) return; // ป้องกันการยิงซ้ำ
+            isProcessing = true;
+            
+            // หยุดกล้องชั่วคราวขณะโหลด
+            stopScanner();
+            beepSound.play().catch(e=>console.log(e)); // เล่นเสียง
+
+            Swal.fire({
+                title: 'กำลังบันทึกข้อมูล...',
+                text: 'บาร์โค้ด: ' + decodedText,
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading()
+                }
+            });
+
+            try {
+                // ส่งข้อมูลไป Google Apps Script
+                // ใช้ content-type เป็น text/plain เพื่อหลีกเลี่ยงปัญหา CORS Preflight ใน GAS
+                const response = await fetch(webAppUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify({ barcode: decodedText })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'บันทึกสำเร็จ!',
+                        text: `บาร์โค้ด: ${decodedText}`,
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                    
+                    // บันทึกลงประวัติ
+                    saveToHistory(decodedText);
+                } else {
+                    throw new Error(result.message || 'เกิดข้อผิดพลาดจากเซิร์ฟเวอร์');
+                }
+
+            } catch (error) {
+                Swal.fire('ข้อผิดพลาด', 'ไม่สามารถบันทึกได้: ' + error.message, 'error');
+            } finally {
+                isProcessing = false;
+                // ถ้าต้องการให้เปิดกล้องต่อทันที สามารถเรียก startScanner() ตรงนี้ได้
+            }
+        }
+
+        // การจัดการประวัติ
+        function saveToHistory(barcode) {
+            const time = new Date().toLocaleTimeString('th-TH');
+            const date = new Date().toLocaleDateString('th-TH');
+            scanHistory.unshift({ barcode, time: `${date} ${time}` });
+            
+            // เก็บสูงสุด 50 รายการ
+            if(scanHistory.length > 50) scanHistory.pop();
+            
+            localStorage.setItem('scanHistory', JSON.stringify(scanHistory));
+            updateHistoryUI();
+        }
+
+        function updateHistoryUI() {
+            const list = document.getElementById('history-list');
+            if (scanHistory.length === 0) {
+                list.innerHTML = '<li class="py-4 text-center text-gray-500 text-sm">ยังไม่มีประวัติการสแกน</li>';
+                return;
+            }
+
+            list.innerHTML = scanHistory.map(item => `
+                <li class="py-3 flex justify-between items-center">
+                    <div>
+                        <p class="font-medium text-gray-800">${item.barcode}</p>
+                        <p class="text-xs text-gray-400">${item.time}</p>
+                    </div>
+                    <i class="fa-solid fa-check-circle text-green-500"></i>
+                </li>
+            `).join('');
+        }
+
+        function clearHistory() {
+            if(scanHistory.length === 0) return;
+            Swal.fire({
+                title: 'ยืนยันการล้างประวัติ?',
+                text: "ประวัติการสแกนในเครื่องจะหายไป",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#3085d6',
+                confirmButtonText: 'ใช่, ลบเลย!',
+                cancelButtonText: 'ยกเลิก'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    scanHistory = [];
+                    localStorage.removeItem('scanHistory');
+                    updateHistoryUI();
+                }
+            });
+        }
+    </script>
+</body>
+</html>
